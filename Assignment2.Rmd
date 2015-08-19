@@ -1,0 +1,380 @@
+---
+title: "Assignment 2"
+author: "Abhishek Sanghavi"
+date: "Tuesday, August 18, 2015"
+output: word_document
+---
+---
+output: word_document
+---
+##Answer 1
+getwd()
+
+###Reading the data
+
+```{r}
+delay_data<-read.csv("ABIA.csv")
+
+require(quantmod)
+require(ggplot2)
+require(reshape2)
+require(plyr)
+require(scales)
+
+names(delay_data)
+```
+
+###Adding required dummy variables
+```{r}
+delay_data$month<-factor(delay_data$Month,levels=as.character(1:12),labels=c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"),ordered=TRUE)
+delay_data$weekday<-factor(delay_data$DayOfWeek,levels=rev(1:7),labels=rev(c("Mon","Tue","Wed","Thu","Fri","Sat","Sun")),ordered=TRUE)
+delay_data$yearmonthf<-factor(delay_data$Month)
+
+```
+
+###Plotting
+```{r}
+ggplot(delay_data, aes(month, weekday, fill = ArrDelay)) + 
+  
+  geom_tile(colour = "white") + 
+  
+  scale_fill_gradientn(colours = c("#D61818","#FFAE63","#FFFFBD","#B5E384")) + 
+  
+  facet_wrap(~ Year, ncol = 1)
+```
+* The plot does not take into consideration time delays if they are infrequent
+* It can be seen from the plot that the boxes with a lighter hue are the ones which had a larger time delay.
+* September, October and November have high time delays. 
+
+###Plotting
+
+```{r}
+ggplot(delay_data, aes(month, weekday, fill = DepDelay)) + 
+  
+  geom_tile(colour = "white") + 
+  
+  scale_fill_gradientn(colours = c("#D61818","#FFAE63","#FFFFBD","#B5E384")) + 
+  
+  facet_wrap(~ Year, ncol = 1)
+```
+
+
+* The plot does not take into consideration time delays if they are infrequent
+* It can be seen from the plot that the boxes with a lighter hue are the ones which had a larger time delay.
+* September, October and November have high time delays. 
+
+* It can be seen that days of the month when Arrival delay is high Departure delay is also high.
+
+* Sundays of the month March, September and November, Mondays and Thursdays of October have both high arrival and departure delays
+
+
+
+
+
+
+##Answer2
+
+###Loading the library and the reader wrapper function
+
+```{r}
+library(tm)
+
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), 
+            id=fname, language='en') }
+
+```
+
+
+
+Making a single corpus from 2 directories i.e Test and Train 
+```{r}
+
+
+
+author_dirs1 = Sys.glob('../data/ReutersC50/C50train/*')
+author_dirs2 = Sys.glob('../data/ReutersC50/C50test/*')
+
+file_list = NULL
+file_list1 = NULL
+labels = NULL
+labels1 = NULL
+labels2 = NULL
+
+for(author in author_dirs1) {
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list = append(file_list, files_to_add)
+}
+
+for(author in author_dirs2) {
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list1 = append(file_list1, files_to_add)
+}
+
+file_list2 = append(file_list,file_list1)
+
+
+```
+
+Adding meta data
+```{r}
+for(author in author_dirs1) {
+  author_name = substring(author, first=29)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  labels1 = append(labels1, rep(author_name, length(files_to_add)))
+}
+
+for(author in author_dirs2) {
+  author_name = substring(author, first=28)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  labels2 = append(labels2, rep(author_name, length(files_to_add)))
+}
+
+labels <- unique(append(labels1, labels2))
+
+```
+
+
+Reading the files from the file list
+```{r}
+all_docs = lapply(file_list2, readerPlain) 
+names(all_docs) = file_list2
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = names(all_docs)
+```
+
+
+
+## Preprocessing the data
+```{r}
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+```
+
+```{r}
+DTM = DocumentTermMatrix(my_corpus)
+DTM # some basic summary statistics
+
+class(DTM)  # a special kind of sparse matrix format
+
+DTM = removeSparseTerms(DTM, 0.975)
+```
+
+
+#Naive Bayes model
+
+```{r}
+X = as.matrix(DTM)
+
+X_train <- X[1:2500,]
+
+
+labels <- unique(labels)
+
+
+smooth_count = 1/nrow(X_train)
+
+for(i in 1:50) 
+{ 
+  nam1 <- paste("w",labels[i], sep = "_")
+  temp <- colSums(X_train[(50*i-49):(50*i),] + smooth_count)
+  assign(nam1, temp/sum(temp))
+}
+
+
+```
+
+
+###Predictions using Naive Bayes
+```{r}
+X_test <- X[2501:5000,]
+
+result = matrix(, nrow = 2500, ncol = 51)
+for(i in 1:2500) 
+{ for(j in 1:50)
+{
+  nam1 <- paste("w",labels[j], sep = "_")
+
+  result[i,j] = sum(X_test[i,]*log(get(nam1)))
+}
+}
+```
+
+
+Assigning author based on calculated probablities
+
+```{r}
+for (i in 1:2500)
+{
+  result[i,51] = which.max(result[i,])
+}
+
+result1 = NULL
+result1 = cbind((rep(1:50, each=50)),result[,51])
+result1$auth <- rep(1:50, each=50)
+result1$pred_auth <- result[,51]
+result1$auth
+result1$pred_auth
+```
+
+
+Using the library caret for calculating prediction accuracy
+```{r}
+library(caret)
+confusionMatrix(result1$pred_auth,result1$auth)
+```
+* As can be seen the model above gives an accuracy of 60.24%
+* Defining the threshold of predicting an author unambiguosly at 70%,
+* Authors 4,7,8,13,15,35,44,50 are difficult to very accurately predict.
+author 8 is the most difficult to predict with an accuracy of about 55%
+
+
+
+
+##Data preparation for other models
+
+Creating author labels
+
+```{r}
+
+author_name=rep(rep(1:50,each=50),2)
+
+```
+
+Converting the document term matrix into a dataframe
+
+```{r}
+author = as.data.frame(X)
+
+```
+
+Giving each column a column name
+
+
+```{r}
+colnames(author) = make.names(colnames(author))
+str(author)
+```
+
+Adding dependent variable as a factor variable in the dataframe
+
+```{r}
+author$author_name = author_name
+author$author_name=as.factor(author$author_name)
+```
+
+
+Dividing data into test and train
+
+
+```{r}
+author_train=author[1:2500,]
+author_test=author[2501:5000,]
+```
+
+
+#Using regression tree for the prediction 
+
+```{r}
+library(rpart)
+authorcart=rpart(author_name~.,data=author_train,method="class",cp=0.0011)
+predictauthor=predict(authorcart,newdata=author_test,type="class")
+confusionMatrix(predictauthor,author_test$author_name)
+```
+
+* The prediction accuracy of the model is 41% which is much lower than the naive bayes model
+
+* To improve accuracy we try a randomForest model instead of a tree.
+
+#Using randomForest for the prediction
+```{r}
+library(randomForest)
+authorforest=randomForest(author_name~.,data=author_train)
+predictauthor=predict(authorforest,newdata=author_test)
+confusionMatrix(predictauthor,author_test$author_name)
+```
+
+* The prediction accuracy of the model is 62.88%
+* Defining the threshold of predicting an author unambiguosly at 70%,
+* Authors 3,7,8,9,10,13,15,44,50 are difficult to very accurately predict.
+author 3,8,44 are the most difficult to predict
+
+
+
+##Answer 3
+
+```{r,warning=FALSE, message=FALSE}
+
+library(arules)  
+library(reshape)
+
+```
+
+* The data is read and the transaction numbers is added to the list 
+* The data frame is reshaped get all the variables in the row(unstacked) format
+* NA's are omittted and the transaction number  is changed to a categorical variable
+
+```{r}
+
+colmax= max(count.fields("../data/groceries.txt",sep=','))
+groceries <- read.csv("../data/groceries.txt", header = FALSE,col.names = paste0("V",seq_len(colmax)),fill = TRUE)
+
+
+row_series<-1:nrow(groceries)
+groceries<-cbind(row_series,groceries)
+
+groceries<-melt(groceries,id=c("row_series"))
+groceries<-groceries[order(groceries$row_series),]
+
+groceries[groceries==""] <- NA
+groceries <- na.omit(groceries)
+
+
+groceries$row_series <- factor(groceries$row_series)
+
+```
+
+* Creating a list of baskets: vectors of items by trasaction
+* Duplicates are removed and cast as a special arules "transaction class"
+
+```{r}
+
+
+# First split data into a list of items for each transaction
+groceries <- split(x=groceries$value, f=groceries$row_series)
+groceries <- lapply(groceries, unique)
+
+groceries_trans <- as(groceries, "transactions")
+
+
+# Using the 'apriori' algorithm, examine the rules with support > .05 & confidence >.5 
+groceries_assoc_rules <- apriori(groceries_trans, parameter=list(support=.05, confidence=.5, maxlen=3))
+                         
+# Look at the output
+inspect(groceries_assoc_rules)
+
+```
+*  We notice that we do not get any set for support of .05.
+
+*	 Reducing it to .01 still keeping the confidence of 0.5 which would give us a better quality of the rules .
+
+
+```{r}
+
+# Look at rules with support > .01 & confidence >.5 & length (# items) <= 4
+groceries_assoc_rules1 <- apriori(groceries_trans, parameter=list(support=.01, confidence=.5, maxlen=3))
+                           
+# Look at the output
+inspect(groceries_assoc_rules1)
+
+```
+
+  *  Whole milk being bought with {Curd, Yogurt} or {Butter, Yogurt} or {whipped/sour cream, yogurt}  is  understandable as they are all dairy products.
+  * Other Vegetables' which is a category has various kind of vegetables is bought with vegetables and fruits. Here we can see that these are bought with {Citrus Fruit, Root vegetables},{Root Vegetables, Tropical Fruit}. There are other categories like {rolls/buns, root vegetables} but other vegetables is only bought when atleast one of the other things bought is a fruit or a vegetable.
+  *   People who do their weekly shop at the retail store tend to buy everything together which will explain the association of dairy products like Milk to categories like vegetables, fruits, buns etc.
